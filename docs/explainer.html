@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Token Market 架构讲解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 技术讲义。宽屏左侧章节目录 + 右侧正文（最宽 820px）；表格、代码、图在各自的横向滚动容器内 */
+:root {
+  --bg: #fbfbfd; --surface: #ffffff; --fg: #171a2b; --muted: #5d6280; --line: #e4e6f0;
+  --accent: #4f46e5; --accent-soft: #eef0fe; --good: #0f8a5f; --good-soft: #e5f5ee;
+  --bad: #c2362b; --bad-soft: #fbeceb; --warn: #9a6200; --warn-soft: #fdf3dc; --code-bg: #f3f4fa;
+  --font-display: "Space Grotesk", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-body: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12131c; --surface: #191b27; --fg: #e9eaf3; --muted: #a0a4bf; --line: #2a2d3e;
+    --accent: #8b85ff; --accent-soft: #24234a; --good: #4fd19a; --good-soft: #15302a;
+    --bad: #ff7a6e; --bad-soft: #3a1c1c; --warn: #f2c063; --warn-soft: #362a12; --code-bg: #20222f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12131c; --surface: #191b27; --fg: #e9eaf3; --muted: #a0a4bf; --line: #2a2d3e;
+  --accent: #8b85ff; --accent-soft: #24234a; --good: #4fd19a; --good-soft: #15302a;
+  --bad: #ff7a6e; --bad-soft: #3a1c1c; --warn: #f2c063; --warn-soft: #362a12; --code-bg: #20222f; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.72;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 96px;
+}
+.wrap { max-width: 1160px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 52px; }
+@media (max-width: 920px) { .wrap { grid-template-columns: minmax(0, 1fr); } nav.toc { display: none; } }
+nav.toc { position: sticky; top: calc(24px + env(safe-area-inset-top, 0px)); align-self: start; font-size: 13px; display: grid; gap: 2px; max-height: calc(100vh - 48px); overflow: auto; }
+nav.toc .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+nav.toc a { color: var(--muted); text-decoration: none; padding: 3px 0 3px 10px; border-left: 2px solid var(--line); }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); border-left-color: var(--accent); outline: none; }
+main { min-width: 0; max-width: 820px; }
+header.hero { display: grid; gap: 14px; margin-bottom: 36px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; color: var(--accent); letter-spacing: .04em; }
+h1 { font-family: var(--font-display); font-size: clamp(28px, 4.6vw, 40px); line-height: 1.18; margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-size: 24px; margin: 60px 0 12px; letter-spacing: -.005em; text-wrap: balance; scroll-margin-top: 24px; }
+h2 .no { font-family: var(--font-mono); font-size: 14px; color: var(--accent); margin-right: 10px; vertical-align: 3px; }
+h3 { font-family: var(--font-display); font-size: 17px; margin: 30px 0 8px; scroll-margin-top: 24px; }
+p { margin: 0 0 14px; max-width: 70ch; }
+ul, ol { margin: 0 0 16px; padding-left: 22px; }
+li { margin: 4px 0; }
+.lede { font-size: 16.5px; color: var(--muted); max-width: 64ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: .86em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre.code { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.8px; line-height: 1.6; margin: 0 0 18px; }
+pre.code code { background: none; padding: 0; }
+.cm { color: var(--muted); }
+.scroll { overflow-x: auto; margin: 0 0 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.8px; }
+th, td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.nw { white-space: nowrap; }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; margin: 0 0 18px; }
+.diagram pre.mermaid { margin: 0; background: transparent; }
+.callout { border-radius: 8px; padding: 12px 14px; margin: 0 0 18px; font-size: 14px; }
+.callout.info { background: var(--accent-soft); }
+.callout.warn { background: var(--warn-soft); }
+.callout b { font-weight: 600; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 8px 0 20px; }
+.result { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; }
+.result .tag { font-size: 12px; font-weight: 600; justify-self: start; padding: 2px 9px; border-radius: 999px; }
+.result.bad .tag { background: var(--bad-soft); color: var(--bad); }
+.result.good .tag { background: var(--good-soft); color: var(--good); }
+.result .big { font-family: var(--font-display); font-size: 28px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.result.bad .big { color: var(--bad); }
+.result.good .big { color: var(--good); }
+.bar { height: 10px; background: var(--code-bg); border-radius: 5px; position: relative; overflow: hidden; }
+.bar span { position: absolute; inset: 0 auto 0 0; border-radius: 5px; }
+.result.bad .bar span { background: var(--bad); }
+.result.good .bar span { background: var(--good); }
+.bar-cap { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.st { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.st.ok { background: var(--good-soft); color: var(--good); }
+.st.part { background: var(--warn-soft); color: var(--warn); }
+.st.no { background: var(--bad-soft); color: var(--bad); }
+.calc { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 18px; }
+.calc dt { color: var(--muted); }
+.calc dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; }
+.arch { width: 100%; min-width: 720px; height: auto; display: block; font-family: var(--font-body); }
+.arch .band { fill: var(--bg); }
+.arch .band.alt { fill: var(--code-bg); }
+.arch .layer { fill: var(--muted); font-size: 13px; font-weight: 600; text-anchor: middle; letter-spacing: .1em; }
+.arch .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.arch .box.hl { stroke: var(--accent); stroke-width: 1.6; }
+.arch .t { fill: var(--fg); font-size: 13.5px; font-weight: 600; text-anchor: middle; }
+.arch .s { fill: var(--muted); font-size: 11.5px; text-anchor: middle; }
+.arch .lft { text-anchor: start; }
+.arch .step rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+.arch .step text { fill: var(--accent); font-size: 12px; font-weight: 600; text-anchor: middle; }
+.arch .ar { stroke: var(--muted); stroke-width: 1.3; fill: none; }
+.arch .ah { fill: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12.5px; color: var(--muted); margin: -6px 0 18px; }
+.legend .lg { display: inline-block; width: 14px; height: 10px; border: 1.4px solid var(--line); border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--surface); }
+.legend .lg.hl { border-color: var(--accent); }
+footer { margin-top: 64px; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="toc" aria-label="章节">
+    <div class="label">目录</div>
+    <a href="#req">需求对照</a>
+    <a href="#arch">整体架构图</a>
+    <a href="#parts">系统构成</a>
+    <a href="#stack">技术选型与理由</a>
+    <a href="#litellm">LiteLLM 负责什么</a>
+    <a href="#code">代码架构</a>
+    <a href="#data">数据模型</a>
+    <a href="#chain">核心调用链路</a>
+    <a href="#reserve">预扣费怎么算</a>
+    <a href="#oversell">并发防超卖</a>
+    <a href="#consist">热数据与账本一致</a>
+    <a href="#stream">流式 Token 统计</a>
+    <a href="#route">渠道路由与健康</a>
+    <a href="#billing">计费、账单与对账</a>
+    <a href="#risk">风险与兜底</a>
+    <a href="#verify">测试与验证</a>
+    <a href="#gap">现状与差距</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">TOKEN MARKET · 架构讲解</div>
+      <h1>大模型 API 中转与 Token 经营平台</h1>
+      <p class="lede">统一接入 OpenAI / Anthropic / DeepSeek 等厂商，提供调用鉴权、输入输出 Token 计量、按量与套餐包计费、额度管控、调用流水和账单对账。后端约 7,400 行 Python，前端约 19,700 行 TypeScript，全部通过 AI Coding 完成。</p>
+      <div class="facts">
+        <span class="chip">FastAPI + asyncio</span>
+        <span class="chip">LiteLLM（仅作 SDK）</span>
+        <span class="chip">PostgreSQL 16</span>
+        <span class="chip">Redis 7 · Lua · Streams</span>
+        <span class="chip">React 19 + shadcn/ui</span>
+        <span class="chip">Docker Compose</span>
+      </div>
+    </header>
+
+    <!-- ============================================================ -->
+    <h2 id="req"><span class="no">01</span>需求对照</h2>
+    <p>题目要求逐项对应到实现位置。状态说明见 <a href="#gap">现状与差距</a>。</p>
+    <div class="scroll"><table>
+      <thead><tr><th>要求</th><th>实现</th><th>代码位置</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td>多厂商统一接入</td><td>OpenAI / Anthropic 双协议入口；同协议直通，跨协议经 LiteLLM 转换；渠道多 Key、优先级、权重、重试</td><td class="mono">relay/upstream.py · selector.py</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>调用鉴权</td><td>API Key 只存 HMAC 哈希；状态、过期、IP / 模型白名单、令牌额度、RPM 限流</td><td class="mono">relay/auth.py · handler.py</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>输入 / 输出 Token 计量</td><td>以上游 usage 为准（含缓存读写）；缺失时按文本估算并标记</td><td class="mono">relay/upstream.py · tokenizer.py</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>按量与套餐包等多模式计费</td><td>钱包按量、Token 套餐包、分组折扣、按次计费、分时计价、价格版本与定时调价</td><td class="mono">billing/pricing.py · quota/lua</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>额度管控</td><td>Redis Lua 多桶预扣：套餐包 → 钱包 → 令牌上限；透支上限；限流</td><td class="mono">quota/engine.py · lua/*.lua</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>调用流水记录</td><td>call_log 按月分区，每笔含 token、售价、成本、价格快照、耗时、重试</td><td class="mono">billing/usage_writer.py</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>账单对账</td><td>日 / 月账单；平台内三项自动对账；与厂商对账：账单导入比对、余额快照比对</td><td class="mono">jobs/report_jobs.py · billing/upstream_recon.py</td><td><span class="st ok">完成</span></td></tr>
+        <tr><td>讲解：架构、链路、防超卖、流式统计、风险</td><td>本页 + docs/ARCHITECTURE.md + 可运行的演示脚本</td><td class="mono">docs/ · scripts/</td><td><span class="st ok">完成</span></td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="arch"><span class="no">02</span>整体架构图</h2>
+    <p>自上而下分四层：接入层负责流量入口与静态站点；应用层是三个进程角色；数据层 Redis 管实时额度与事件、PostgreSQL 管账本；最下面是外部的模型厂商与支付网关。</p>
+    <div class="diagram arch-wrap">
+      <svg class="arch" viewBox="0 0 1000 720" role="img" aria-label="Token Market 整体架构图">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+        </defs>
+        <!-- 分层底色 -->
+        <rect class="band" x="0" y="8" width="1000" height="162" rx="10"/>
+        <rect class="band alt" x="0" y="178" width="1000" height="274" rx="10"/>
+        <rect class="band" x="0" y="460" width="1000" height="110" rx="10"/>
+        <rect class="band alt" x="0" y="578" width="1000" height="134" rx="10"/>
+        <text class="layer" x="48" y="94">接入层</text>
+        <text class="layer" x="48" y="320">应用层</text>
+        <text class="layer" x="48" y="520">数据层</text>
+        <text class="layer" x="48" y="650">外部服务</text>
+
+        <!-- 接入层 -->
+        <rect class="box" x="110" y="24" width="200" height="56" rx="8"/><text class="t" x="210" y="47">API 调用方</text><text class="s" x="210" y="66">OpenAI SDK · curl · 业务系统</text>
+        <rect class="box" x="330" y="24" width="200" height="56" rx="8"/><text class="t" x="430" y="47">Claude Code</text><text class="s" x="430" y="66">Anthropic SDK · /v1/messages</text>
+        <rect class="box" x="550" y="24" width="200" height="56" rx="8"/><text class="t" x="650" y="47">用户端（React）</text><text class="s" x="650" y="66">模型广场 · Key · 钱包 · 套餐</text>
+        <rect class="box" x="770" y="24" width="210" height="56" rx="8"/><text class="t" x="875" y="47">管理端（React）</text><text class="s" x="875" y="66">渠道 · 计费 · 对账 · 审计</text>
+        <line class="ar" x1="210" y1="80" x2="210" y2="108" marker-end="url(#ah)"/>
+        <line class="ar" x1="430" y1="80" x2="430" y2="108" marker-end="url(#ah)"/>
+        <line class="ar" x1="650" y1="80" x2="650" y2="108" marker-end="url(#ah)"/>
+        <line class="ar" x1="875" y1="80" x2="875" y2="108" marker-end="url(#ah)"/>
+        <rect class="box hl" x="110" y="110" width="870" height="46" rx="8"/>
+        <text class="t" x="545" y="130">Nginx</text>
+        <text class="s" x="545" y="148">:80 用户端静态页 · /v1 → relay · /api → api（屏蔽 /api/admin）　|　:81 管理端静态页 · /api → api　|　SSE 关闭缓冲</text>
+
+        <!-- 应用层：relay -->
+        <line class="ar" x1="325" y1="156" x2="325" y2="194" marker-end="url(#ah)"/>
+        <line class="ar" x1="660" y1="156" x2="660" y2="194" marker-end="url(#ah)"/>
+        <rect class="box hl" x="110" y="196" width="430" height="240" rx="10"/>
+        <text class="t lft" x="126" y="220">relay · 数据面（/v1/*，无状态，水平扩展）</text>
+        <g class="step">
+          <rect x="126" y="236" width="92" height="36" rx="6"/><text x="172" y="259">鉴权 · 限流</text>
+          <rect x="232" y="236" width="92" height="36" rx="6"/><text x="278" y="259">价格快照</text>
+          <rect x="338" y="236" width="92" height="36" rx="6"/><text x="384" y="259">Lua 预扣</text>
+          <rect x="444" y="236" width="82" height="36" rx="6"/><text x="485" y="259">选渠道</text>
+          <rect x="420" y="296" width="106" height="36" rx="6"/><text x="473" y="319">协议适配</text>
+          <rect x="286" y="296" width="106" height="36" rx="6"/><text x="339" y="319">SSE 计量</text>
+          <rect x="126" y="296" width="132" height="36" rx="6"/><text x="192" y="319">Lua 结算 + 事件</text>
+        </g>
+        <line class="ar" x1="218" y1="254" x2="230" y2="254" marker-end="url(#ah)"/>
+        <line class="ar" x1="324" y1="254" x2="336" y2="254" marker-end="url(#ah)"/>
+        <line class="ar" x1="430" y1="254" x2="442" y2="254" marker-end="url(#ah)"/>
+        <path class="ar" d="M485,272 L485,294" marker-end="url(#ah)"/>
+        <line class="ar" x1="420" y1="314" x2="394" y2="314" marker-end="url(#ah)"/>
+        <line class="ar" x1="286" y1="314" x2="260" y2="314" marker-end="url(#ah)"/>
+        <text class="s lft" x="126" y="360">· 同协议 httpx 直通；跨协议（OpenAI ↔ Anthropic）由 LiteLLM SDK 转换</text>
+        <text class="s lft" x="126" y="380">· 失败：429/5xx 冷却 Key 换下一档；401/403/欠费 自动禁用 Key</text>
+        <text class="s lft" x="126" y="400">· 进程内缓存模型 / 价格 / 渠道，Redis 版本号 1 秒内失效</text>
+        <text class="s lft" x="126" y="420">· Redis 故障时降级为 PostgreSQL 条件扣减</text>
+
+        <!-- 应用层：api -->
+        <rect class="box" x="560" y="196" width="200" height="240" rx="10"/>
+        <text class="t lft" x="576" y="220">api · 控制面（/api/*）</text>
+        <text class="s lft" x="576" y="250">· 登录注册 · 用户端接口</text>
+        <text class="s lft" x="576" y="274">· 管理端接口（审计）</text>
+        <text class="s lft" x="576" y="298">· 公开接口 · 模型广场</text>
+        <text class="s lft" x="576" y="322">· 下单 · 支付回调验签</text>
+        <text class="s lft" x="576" y="346">· 资金变更 + outbox</text>
+        <text class="s lft" x="576" y="370">· 操练场 → relay</text>
+
+        <!-- 应用层：worker -->
+        <rect class="box" x="780" y="196" width="200" height="240" rx="10"/>
+        <text class="t lft" x="796" y="220">worker · 后台任务</text>
+        <text class="s lft" x="796" y="250">· 计量事件幂等落库</text>
+        <text class="s lft" x="796" y="274">· outbox 重试同步</text>
+        <text class="s lft" x="796" y="298">· 预扣超时回收</text>
+        <text class="s lft" x="796" y="322">· 套餐过期 · 分区预建</text>
+        <text class="s lft" x="796" y="346">· 渠道巡检 · 余额快照</text>
+        <text class="s lft" x="796" y="370">· 日/月账单 · 对账</text>
+
+        <!-- 层间数据流 -->
+        <line class="ar" x1="128" y1="436" x2="128" y2="594" marker-end="url(#ah)"/>
+        <text class="s lft" x="134" y="590">调用上游</text>
+        <line class="ar two" x1="330" y1="438" x2="330" y2="474" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text class="s lft" x="336" y="460">预扣 / 结算 / XADD</text>
+        <path class="ar" d="M600,436 L600,446 L500,446 L500,474" marker-end="url(#ah)"/>
+        <text class="s" x="548" y="441">outbox</text>
+        <path class="ar" d="M540,500 L548,500 L548,458 L840,458 L840,438" marker-end="url(#ah)"/>
+        <text class="s" x="700" y="453">计量事件 Stream（消费者组）</text>
+        <line class="ar" x1="680" y1="436" x2="680" y2="474" marker-end="url(#ah)"/>
+        <line class="ar" x1="930" y1="436" x2="930" y2="474" marker-end="url(#ah)"/>
+
+        <!-- 数据层 -->
+        <rect class="box" x="150" y="476" width="390" height="80" rx="10"/>
+        <text class="t lft" x="166" y="500">Redis 7（AOF · noeviction）</text>
+        <text class="s lft" x="166" y="522">额度热数据（钱包 / 套餐 / 令牌）· Lua 原子预扣与结算</text>
+        <text class="s lft" x="166" y="542">计量事件 Stream · 缓存版本号 · 限流计数 · Key 冷却</text>
+        <rect class="box" x="560" y="476" width="420" height="80" rx="10"/>
+        <text class="t lft" x="576" y="500">PostgreSQL 16（最终账本）</text>
+        <text class="s lft" x="576" y="522">账务流水（只追加，唯一约束幂等）· 调用流水（按月分区）</text>
+        <text class="s lft" x="576" y="542">钱包 · 套餐 · 订单 · 渠道 · 价格版本 · 上游账单 · 对账报告</text>
+
+        <!-- 外部服务 -->
+        <rect class="box" x="110" y="596" width="430" height="96" rx="10"/>
+        <text class="t lft" x="126" y="620">模型厂商（渠道）</text>
+        <text class="s lft" x="126" y="642">OpenAI · Anthropic · DeepSeek · 通义 · OpenAI 兼容 · Mock</text>
+        <text class="s lft" x="126" y="664">多 Key 加密存储 · 优先级 / 权重路由 · 分时采购价</text>
+        <text class="s lft" x="126" y="684">余额接口 → 余额快照对账 · 账单 CSV → 账单比对</text>
+        <rect class="box" x="560" y="596" width="420" height="96" rx="10"/>
+        <text class="t lft" x="576" y="620">支付网关</text>
+        <text class="s lft" x="576" y="642">支付宝 / 微信（当前为模拟网关，接口已抽象）</text>
+        <text class="s lft" x="576" y="664">签名回调 → api 验签、金额比对、行锁幂等发货</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="lg hl"></i>主链路组件</span>
+      <span><i class="lg"></i>其他组件</span>
+      <span>箭头为请求或数据流向</span>
+    </div>
+
+    <!-- ============================================================ -->
+    <h2 id="parts"><span class="no">03</span>系统构成</h2>
+    <p>一套 Docker Compose，8 个容器。业务代码只有一个 Python 代码库，以 3 种进程角色运行，前端是两个独立构建的 React 应用。</p>
+    <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph 客户端
+    SDK[SDK / curl / Claude Code]
+    U[用户端浏览器]
+    AD[管理员浏览器]
+  end
+  subgraph web[web 容器 · Nginx]
+    N80[":80 用户端静态页<br/>/v1 → relay · /api → api<br/>屏蔽 /api/admin"]
+    N81[":81 管理端静态页<br/>/api → api"]
+  end
+  SDK --> N80
+  U --> N80
+  AD --> N81
+  N80 --> R[relay 数据面]
+  N80 --> A[api 控制面]
+  N81 --> A
+  A -- 操练场 --> R
+  R <--> RD[(Redis)]
+  A <--> PG[(PostgreSQL)]
+  A -- outbox --> RD
+  R --> UP[厂商上游 / Mock]
+  RD -- 计量事件 Stream --> W[worker]
+  W --> PG
+  M[migrate 一次性任务] --> PG
+</pre>
+    </div>
+    <div class="scroll"><table>
+      <thead><tr><th>容器</th><th>职责</th><th>扩展</th></tr></thead>
+      <tbody>
+        <tr><td class="mono nw">web</td><td>Nginx：两个前端静态站点、反向代理、SSE 关闭缓冲；80 端口对外屏蔽管理接口</td><td>无状态</td></tr>
+        <tr><td class="mono nw">relay</td><td>数据面，处理全部 <code>/v1/*</code>：鉴权、限流、定价、预扣、选渠道、转发、计量、结算</td><td>无状态，按 CPU 水平扩展</td></tr>
+        <tr><td class="mono nw">api</td><td>控制面，处理 <code>/api/*</code>：登录注册、用户端、管理端、公开接口、支付回调、操练场代理</td><td>无状态，水平扩展</td></tr>
+        <tr><td class="mono nw">worker</td><td>后台：计量事件落库、outbox 重试、预扣回收、套餐过期、分区预建、渠道巡检、订单超时、账单、对账</td><td>多实例；Stream 消费者组分摊，周期任务用 Redis 锁互斥</td></tr>
+        <tr><td class="mono nw">migrate</td><td>启动时执行 Alembic 迁移与初始化数据后退出；api / relay / worker 等它成功才启动</td><td>一次性</td></tr>
+        <tr><td class="mono nw">postgres</td><td>最终账本与全部业务数据</td><td>主从 / 托管</td></tr>
+        <tr><td class="mono nw">redis</td><td>额度热数据、Lua 原子脚本、计量事件 Stream、缓存版本号、限流计数、渠道冷却</td><td>AOF 持久化，不淘汰</td></tr>
+        <tr><td class="mono nw">mock-upstream</td><td>OpenAI / Anthropic 兼容模拟上游，可注入 401 / 429 / 5xx / 超时 / 截断 / 无 usage</td><td>仅测试</td></tr>
+      </tbody>
+    </table></div>
+    <p>数据面和控制面分成两种进程：调用流量和管理流量互不影响，relay 可以单独扩容，api 发版也不会打断正在进行的流式调用。</p>
+
+    <!-- ============================================================ -->
+    <h2 id="stack"><span class="no">04</span>技术选型与理由</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>环节</th><th>选择</th><th>理由</th><th>没选的方案</th></tr></thead>
+      <tbody>
+        <tr><td>Web 框架</td><td>FastAPI + uvicorn（asyncio）</td><td>中转是典型的 IO 密集：大量长连接 SSE 等待上游，协程一个进程就能挂数千个并发流</td><td>同步框架需要大量线程</td></tr>
+        <tr><td>上游 HTTP</td><td>httpx 共享连接池</td><td>支持流式、超时细分、连接复用；同协议直通时自己掌控每个字节</td><td>—</td></tr>
+        <tr><td>协议转换</td><td>LiteLLM SDK（锁定 1.109.1）</td><td>OpenAI↔Anthropic 消息格式、参数、流事件的互转工作量大且易错，复用成熟实现</td><td>LiteLLM Proxy（见下节）</td></tr>
+        <tr><td>额度</td><td>Redis Lua 脚本</td><td>单线程执行，脚本内的「检查 + 扣减」天然原子；微秒级，不占数据库连接</td><td>数据库行锁（热点用户锁竞争、连接占用）；分布式锁（多一次往返且锁超时难处理）</td></tr>
+        <tr><td>计量事件</td><td>Redis Streams 消费者组</td><td>与额度在同一个 Redis，可在 Lua 里和结算原子写入；支持确认、重领、死信</td><td>Kafka（多一个系统，且无法与额度变更原子提交）</td></tr>
+        <tr><td>账本</td><td>PostgreSQL 16</td><td>事务、唯一约束做幂等、JSONB 存快照、原生分区存调用流水</td><td>—</td></tr>
+        <tr><td>ORM</td><td>SQLAlchemy 2 async + asyncpg + Alembic</td><td>异步驱动性能好；迁移可追溯</td><td>—</td></tr>
+        <tr><td>Token 估算</td><td>tiktoken（o200k_base）</td><td>本地计算、快；只用于预扣估算和兜底，计费以上游 usage 为准</td><td>调上游 count_tokens（多一次网络往返）</td></tr>
+        <tr><td>前端</td><td>React 19 + Vite + shadcn/ui + TanStack Query/Table</td><td>与 New API 新版前端同类技术栈，组件质量高，信息密度可控</td><td>通用中后台模板（偏「后台管理」观感）</td></tr>
+        <tr><td>产品形态</td><td>参考 New API 的功能与交互，代码自研</td><td>成熟的商用信息架构；New API 是 AGPL，直接复制会带来开源义务</td><td>Fork New API（Go，且需改造计费核心）</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="litellm"><span class="no">05</span>LiteLLM 负责什么</h2>
+    <p>LiteLLM 有两种用法：作为独立网关（LiteLLM Proxy，自带 Key、模型、预算数据库），或者作为 Python 库（SDK）。本项目只把它当 <b>协议转换库</b> 用，而且只在跨协议时才调用。</p>
+    <div class="callout info"><b>为什么不用 LiteLLM Proxy：</b>它自己维护一套 Key 表和模型表，渠道和令牌会在两边各存一份、需要同步；它的预算按美元累计，表达不了「套餐包 + 钱包」的多桶 Token 额度；渠道优先级、多 Key 轮询、自动禁用这些也要迁就它的路由模型。所以网关自研，LiteLLM 只做最难写对的那部分。</div>
+    <h3>请求由谁处理</h3>
+    <div class="scroll"><table>
+      <thead><tr><th>请求协议 ↓ / 渠道 →</th><th>OpenAI 兼容（OpenAI、DeepSeek、通义…）</th><th>Anthropic</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">/v1/chat/completions</td><td>httpx 直通</td><td>LiteLLM <code>acompletion</code> 转换</td></tr>
+        <tr><td class="mono">/v1/messages</td><td>LiteLLM <code>anthropic.messages.acreate</code> 转换</td><td>httpx 直通</td></tr>
+        <tr><td class="mono">/v1/embeddings</td><td>httpx 直通</td><td>不支持</td></tr>
+      </tbody>
+    </table></div>
+    <div class="scroll"><table>
+      <thead><tr><th>LiteLLM 负责</th><th>我们自己负责</th></tr></thead>
+      <tbody>
+        <tr><td>OpenAI ↔ Anthropic 的消息、system、tools、thinking 等字段互转<br>目标厂商不支持的参数自动丢弃（<code>drop_params</code>）<br>流事件格式互转（chunk ↔ message_start / content_block_delta…）<br>异常归一化（带 <code>status_code</code>，供我们判断重试与禁用）</td><td>鉴权、限流、模型与价格<br>渠道选择、多 Key、重试、冷却、自动禁用<br>预扣、结算、计量、流水、账单<br>同协议直通（大部分流量不经过 LiteLLM）<br>SSE 解析与 usage 提取（包括 LiteLLM 转换后的流）<br>客户端断开时关闭上游连接</td></tr>
+      </tbody>
+    </table></div>
+    <p>使用约束（<code>core/logging.py · configure_litellm</code>）：每次调用显式传入渠道的 Key 和地址、<code>max_retries=0</code>（重试由我们做）；关闭它的回调、消息日志和启动时下载价格表；关闭 aiohttp 传输（高并发下有连接泄漏记录）；Anthropic→OpenAI 兼容渠道强制走 chat/completions，因为 DeepSeek 等不支持 OpenAI Responses API。</p>
+
+    <!-- ============================================================ -->
+    <h2 id="code"><span class="no">06</span>代码架构</h2>
+<pre class="code"><code>server/app/
+  main_api.py          <span class="cm"># api 进程入口：挂载 auth / public / console / admin 路由</span>
+  main_relay.py        <span class="cm"># relay 进程入口：挂载 /v1 路由</span>
+  worker.py            <span class="cm"># worker 进程：计量消费者 + 周期任务调度</span>
+  cli.py               <span class="cm"># seed / sync-catalog</span>
+  core/                <span class="cm"># 配置、数据库、Redis、安全（哈希/加密/JWT）、异常、缓存版本号、业务设置</span>
+  models/              <span class="cm"># SQLAlchemy 表定义（24 张表）</span>
+  relay/               <span class="cm"># 数据面</span>
+    router.py          <span class="cm">#   /v1/chat/completions · /v1/messages · /v1/embeddings · /v1/models</span>
+    handler.py         <span class="cm">#   主链路：prepare → reserve → call_upstream → stream/settle</span>
+    auth.py            <span class="cm">#   API Key 鉴权（Redis 缓存 + 单飞）</span>
+    catalog.py         <span class="cm">#   进程内目录：模型、价格、分组、渠道、能力表（版本号失效）</span>
+    selector.py        <span class="cm">#   选渠道：优先级分档 + 加权随机 + 多 Key + 冷却</span>
+    upstream.py        <span class="cm">#   适配器：OpenAI 直通 / Anthropic 直通 / LiteLLM 转换；SSE 计量</span>
+    sse.py · tokenizer.py
+  quota/               <span class="cm"># 额度引擎</span>
+    lua/reserve.lua    <span class="cm">#   原子预扣</span>
+    lua/settle.lua     <span class="cm">#   原子结算 + 写计量事件</span>
+    lua/load.lua · apply_ext.lua
+    engine.py          <span class="cm">#   Python 封装；service.py 装配 PG 加载器；fallback_pg.py Redis 故障降级</span>
+  billing/             <span class="cm"># pricing.py 计价 · accounting.py 记账+outbox · usage_writer.py 计量落库</span>
+  commerce/            <span class="cm"># orders.py 下单/回调履约 · payments/ 网关抽象+模拟网关 · redemption.py</span>
+  channels/            <span class="cm"># service.py 保存渠道/重建能力表 · tester.py 测试/余额/拉模型 · health.py 自动禁用与恢复</span>
+  api/                 <span class="cm"># 控制面路由：auth · public · console · admin/(channels, catalog, users, ops)</span>
+  jobs/                <span class="cm"># usage_consumer · quota_jobs · channel_jobs · report_jobs</span>
+
+web/src/
+  shared/              <span class="cm"># 两个应用共用：shadcn 组件、API 客户端、格式化、表格、布局、登录态</span>
+  console/             <span class="cm"># 用户端 + 公开站（14 个页面）</span>
+  admin/               <span class="cm"># 管理端（18 个页面）</span></code></pre>
+    <p>分层约定：路由层只做参数校验和权限；资金相关的写操作全部经过 <code>billing/accounting.py</code>（保证「改余额 + 写流水 + 写 outbox」在同一事务）；数据面不直接写数据库，只写 Redis，由 worker 异步落库。</p>
+
+    <!-- ============================================================ -->
+    <h2 id="data"><span class="no">07</span>数据模型</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>领域</th><th>表</th><th>要点</th></tr></thead>
+      <tbody>
+        <tr><td>账户</td><td class="mono">user · user_group · api_token</td><td>分组决定价格折扣、充值倍率、令牌可选分组；令牌只存哈希</td></tr>
+        <tr><td>目录</td><td class="mono">vendor · model_meta · model_price</td><td>价格按版本追加，不修改历史；调用时快照</td></tr>
+        <tr><td>供给</td><td class="mono">channel · channel_key · ability</td><td>Key 加密存储、逐条启停；ability 是 (分组, 模型, 渠道) 展开表</td></tr>
+        <tr><td>资金</td><td class="mono">wallet · package_product · user_package · ledger_entry · quota_outbox</td><td>流水只追加，(业务类型, 业务ID, 桶) 唯一；outbox 同步热数据</td></tr>
+        <tr><td>交易</td><td class="mono">order · redemption_code</td><td>订单状态机 pending → paid → fulfilled；兑换码 CAS</td></tr>
+        <tr><td>流水与报表</td><td class="mono">call_log · usage_hourly · statement · recon_report</td><td>call_log 按月分区；小时聚合支撑看板与账单</td></tr>
+        <tr><td>运维</td><td class="mono">setting · announcement · notification · audit_log</td><td>业务参数可在管理端修改，秒级生效</td></tr>
+      </tbody>
+    </table></div>
+    <p>金额统一用 <b>整数微元</b>（1 元 = 1,000,000），全链路整数运算、向上取整。单价单位是「微元 / 百万 token」，套餐包以 token 计。</p>
+
+    <!-- ============================================================ -->
+    <h2 id="chain"><span class="no">08</span>核心调用链路</h2>
+    <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant R as relay
+  participant RD as Redis
+  participant UP as 上游
+  participant W as worker
+  participant PG as PostgreSQL
+  C->>R: POST /v1/chat/completions
+  R->>RD: 鉴权缓存（未命中则单飞查 PG）
+  R->>R: 限流 · 白名单 · 价格快照 · 预估用量
+  R->>RD: reserve.lua 预扣（不足返回 402）
+  loop 最多 retry_times + 1 次
+    R->>R: 选渠道 / Key
+    R->>UP: 直通或 LiteLLM 转换
+    UP-->>R: 失败则冷却或禁用 Key，换下一档
+  end
+  UP-->>R: 响应 / SSE 流
+  R-->>C: 逐帧透传
+  R->>RD: settle.lua 结算 + XADD 计量事件（原子）
+  RD-->>W: XREADGROUP
+  W->>PG: 一个事务：call_log + ledger + 余额 + 套餐 + 统计
+</pre>
+    </div>
+    <div class="scroll"><table>
+      <thead><tr><th>步骤</th><th>做什么</th><th>函数</th></tr></thead>
+      <tbody>
+        <tr><td>鉴权</td><td>HMAC(Key) 查 Redis（30 秒缓存）；同进程并发未命中只查一次 PG；校验用户与令牌状态、过期、IP、模型白名单</td><td class="mono">auth.authenticate</td></tr>
+        <tr><td>准备</td><td>解析模型 → 是否上架 → 当前价格 × 分组倍率；RPM 限流；预估用量</td><td class="mono">handler.prepare</td></tr>
+        <tr><td>预扣</td><td>选出适用的套餐包，执行 reserve.lua；Redis 不可用时走 PG 条件扣减</td><td class="mono">handler.reserve</td></tr>
+        <tr><td>调上游</td><td>选渠道 → 适配器 → 失败分类：401/403/关键词禁用、429/5xx 冷却、其余直接返回</td><td class="mono">handler.call_upstream</td></tr>
+        <tr><td>响应</td><td>非流式直接结算；流式包成 StreamingResponse，在 finally 中结算</td><td class="mono">handler.relay / _stream</td></tr>
+        <tr><td>结算</td><td>算实际售价与渠道成本，settle.lua 多退少补并写事件</td><td class="mono">handler.settle</td></tr>
+        <tr><td>落库</td><td>call_log 插入作为幂等闸门，成功才写流水、余额、套餐、令牌用量、渠道统计、小时聚合</td><td class="mono">usage_writer.persist_usage_event</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="reserve"><span class="no">09</span>预扣费怎么算</h2>
+    <p>预扣的目的是：在调用上游之前，把这次请求<b>最多可能花的钱</b>先冻结，确保冻结成功的请求一定付得起。上游返回后再按实际用量结算，多冻结的退回。</p>
+    <h3>预估用量</h3>
+    <ul>
+      <li><b>输入 token</b>：用 tiktoken 对请求本身计数。每条消息加 4 个结构 token，图片按 1,000、文档按 2,000 估，tools 定义按 JSON 文本计。输入在请求发出前就确定，估得比较准。</li>
+      <li><b>输出 token</b>：输出长度事先未知，所以取<b>请求里的上限</b>：<code>max_completion_tokens</code> / <code>max_tokens</code> / <code>max_output_tokens</code>；没传时用配置 <code>billing.default_max_tokens</code>（默认 4,096）。再和两个上限取较小值：配置 <code>billing.max_est_output_tokens</code>（默认 32,768）、模型的最大输出。</li>
+      <li><b>embeddings</b>：只有输入。</li>
+    </ul>
+    <p>所以答案是：<b>基于 max_tokens，并加了上限</b>。max_tokens 是上游会生成的硬上限，按它冻结，正常情况下结算时只会退款、不会补扣。</p>
+    <h3>分桶冻结（reserve.lua）</h3>
+    <ol>
+      <li>选出适用当前模型、未过期的套餐包，<b>按到期时间升序</b>。</li>
+      <li>每个包按自己的计量规则算所需 token：<code>输入 × 输入权重 + 输出 × 输出权重</code>。包够用就全部由它覆盖；不够就覆盖一部分，记下剩余比例 f。</li>
+      <li>剩余比例换算成钱包金额：<code>f × 预估售价</code>，检查钱包可用余额和令牌额度上限。</li>
+      <li><b>全部检查通过后才写入</b>：套餐余量减少、钱包可用 → 冻结、令牌额度减少，并保存预扣单（分配明细 + 结算上下文 + TTL）。任一项不足直接返回 402，什么都不改。</li>
+    </ol>
+    <h3>计算示例</h3>
+    <p>claude-sonnet-5-5，售价输入 ¥14.4 / 输出 ¥72 每百万 token，default 分组（倍率 1）。请求输入 1,200 token，<code>max_tokens=2000</code>，实际输出 350 token。</p>
+    <dl class="calc">
+      <dt>预估售价</dt><dd>1,200 × 14.4 + 2,000 × 72 = 161,280 微元（¥0.161280），冻结</dd>
+      <dt>实际售价</dt><dd>1,200 × 14.4 + 350 × 72 = 42,480 微元（¥0.042480），扣除</dd>
+      <dt>退回</dt><dd>118,800 微元</dd>
+    </dl>
+    <p>套餐包示例：「DeepSeek 千万包」输出按 4 倍计量，同样的预估用量需要 1,200 + 2,000 × 4 = 9,200 token。如果包里只剩 5,000，它覆盖 5,000 / 9,200 ≈ 54.3%，剩下 45.7% 按售价走钱包。结算时按同样顺序和实际用量重新分摊。</p>
+    <h3>结算（settle.lua）</h3>
+    <ul>
+      <li>按预扣时的分配顺序，用实际用量重新计算每个桶该扣多少；没用完的冻结退回。</li>
+      <li>实际超过冻结（预估偏差，例如上游不认 max_tokens）时，从可用余额追加；允许透支到 <code>billing.overdraft_limit</code>（默认 ¥0.5），再超出的记为 <code>shortfall</code> 并告警。</li>
+      <li>同一个脚本里 <code>XADD</code> 计量事件，额度变化和待落库事件不会只发生一半。</li>
+      <li>预扣单被删除后再结算会返回「无预扣单」，重复结算天然幂等。</li>
+    </ul>
+    <div class="callout warn"><b>取舍：</b>max_tokens 很大时（例如 128K 输出的模型），按上限冻结会让余额较少的用户被提前拒绝，即使他实际只用一点点。目前用 32,768 的估算上限缓解，代价是极端长输出要靠透支额度兜底。更精细的做法是「流式过程中按实际输出增量追加冻结，追加失败就截断」，这一项尚未实现。</div>
+
+    <!-- ============================================================ -->
+    <h2 id="oversell"><span class="no">10</span>并发防超卖</h2>
+    <p>「先查余额，调用完再扣」在并发下的问题：N 个请求同时查到同一个余额，全部放行。Redis 单线程执行 Lua 脚本，脚本内部的「检查 + 冻结」不会被其他请求插入，所以不会超卖；冻结后的余额对后续请求立即可见。</p>
+    <p>实测：余额 ¥1.00，300 个并发请求各需 ¥0.01，理论上最多成功 100 笔。</p>
+    <div class="compare">
+      <div class="result bad">
+        <span class="tag">先查后扣</span>
+        <div class="big">超卖 200 笔</div>
+        <div class="bar" aria-hidden="true"><span style="width:100%"></span></div>
+        <div class="bar-cap">300 个请求全部成功，余额 −¥2.00</div>
+      </div>
+      <div class="result good">
+        <span class="tag">Lua 原子预扣</span>
+        <div class="big">超卖 0 笔</div>
+        <div class="bar" aria-hidden="true"><span style="width:33.3%"></span></div>
+        <div class="bar-cap">成功 100 个，余额 ¥0.00</div>
+      </div>
+    </div>
+    <p>端到端（Docker 全栈，经 Nginx）：余额 ¥0.002，500 个并发流式请求，成功 15、额度不足拒绝 485、其他错误 0；余额未为负，Redis = PostgreSQL = 流水合计，三项对账一致。</p>
+    <p>余额购买套餐、管理员扣款这类非调用的扣减，同样先在 Redis 冻结金额，再写 PostgreSQL，避免和正在进行的调用争抢同一笔余额。</p>
+
+    <!-- ============================================================ -->
+    <h2 id="consist"><span class="no">11</span>热数据与账本一致</h2>
+    <p>Redis 里的余额是「热副本」，PostgreSQL 的流水是「账本」。两者的关系：</p>
+    <div class="scroll"><table>
+      <thead><tr><th>场景</th><th>做法</th></tr></thead>
+      <tbody>
+        <tr><td>首次访问</td><td>Redis 没有该用户时从 PG 快照加载（load.lua 只在不存在时写，并发加载只生效一次）</td></tr>
+        <tr><td>调用扣费</td><td>Redis 先扣，计量事件经 Stream 由 worker 写入 PG（扣余额 + 写流水在同一事务）</td></tr>
+        <tr><td>充值、兑换、调整、发套餐、过期</td><td>PG 事务内写余额、流水、<code>ext_version + 1</code>、outbox；提交后立即投递到 Redis，失败由 worker 每 5 秒重试</td></tr>
+        <tr><td>加载和充值同时发生</td><td>apply_ext.lua 只应用版本号大于「加载时版本」的变更，并按操作 ID 去重，避免重复入账</td></tr>
+        <tr><td>进程崩溃留下的预扣</td><td>预扣单 TTL 是回收期限的 2 倍；worker 扫描到期预扣，按预估值保守结算并标记 reaped</td></tr>
+        <tr><td>Redis 宕机</td><td>降级为 <code>UPDATE wallet … WHERE balance &gt;= :x</code> 条件扣减（同样原子），变更写 outbox，恢复后同步回 Redis；也可配置为直接拒绝</td></tr>
+        <tr><td>持续核对</td><td>Redis（可用 + 冻结）= PG 余额，仅在计量流无积压、无待同步 outbox 时比对；有差异可一键重建</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="stream"><span class="no">12</span>流式 Token 统计</h2>
+    <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  S[上游 SSE] --> P[增量 SSE 解析器：按空行切帧，原帧转发]
+  P --> U{拿到 usage?}
+  U -->|是| A[以上游为准]
+  U -->|否| E[输入用预估值，输出按文本 tiktoken 计数，标记 estimated]
+  P --> F{结束方式}
+  F -->|正常结束| OK[success：全额计费]
+  F -->|上游中断| X[failed：按已生成部分计费]
+  F -->|客户端断开| CA[client_abort：关闭上游 + 按已生成部分计费]
+  F -->|没有任何输出| Z[不计费，释放全部冻结]
+</pre>
+    </div>
+    <div class="scroll"><table>
+      <thead><tr><th>协议</th><th>usage 从哪来</th></tr></thead>
+      <tbody>
+        <tr><td>OpenAI 兼容</td><td>请求时注入 <code>stream_options.include_usage=true</code>，末尾多一个只含 usage 的包；客户端本身没要求的话把这个包吞掉，对客户端透明。缓存命中取 <code>prompt_tokens_details.cached_tokens</code>，DeepSeek 取 <code>prompt_cache_hit_tokens</code></td></tr>
+        <tr><td>Anthropic</td><td><code>message_start</code> 给出输入、缓存读、缓存写；<code>message_delta</code> 给出累计输出。输入总数 = input + cache_read + cache_creation</td></tr>
+        <tr><td>LiteLLM 转换后的流</td><td>由 LiteLLM 归一化后再走同一套解析</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li><b>断开也一定结算</b>：客户端断开时生成器被取消，<code>finally</code> 里用 <code>anyio.CancelScope(shield=True)</code> 屏蔽取消，保证「关闭上游连接 + 结算」执行完。关闭上游很重要：否则上游继续生成，平台照样付钱。</li>
+      <li><b>计费原则</b>：已生成的部分照常计费（上游也按已生成向平台收费）；一个字都没生成的失败不计费。</li>
+      <li><b>三层保障</b>：流结束时结算 → 结算没执行到时由预扣回收任务兜底 → 落库失败由消费者组重领，10 次失败进死信并通知管理员。</li>
+    </ul>
+    <div class="scroll"><table>
+      <thead><tr><th>故障注入（make fault）</th><th>流水状态</th><th>计费</th></tr></thead>
+      <tbody>
+        <tr><td>客户端读 10 个分片后断开</td><td class="mono">client_abort · 499</td><td>按已生成部分（估算）</td></tr>
+        <tr><td>上游输出一半后断开</td><td class="mono">failed</td><td>按已生成部分</td></tr>
+        <tr><td>上游不返回 usage</td><td class="mono">success · estimated</td><td>按文本估算</td></tr>
+        <tr><td>上游返回 500</td><td class="mono">success · retry 1</td><td>换 Key 重试成功，正常计费</td></tr>
+        <tr><td>上游返回 401</td><td class="mono">success · retry 1</td><td>该 Key 自动禁用并通知，换 Key 成功</td></tr>
+        <tr><td>Redis 宕机</td><td class="mono">success</td><td>PG 条件扣减，恢复后同步，对账一致</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="route"><span class="no">13</span>渠道路由与健康</h2>
+    <p>一个模型能被调用需要三样：<b>模型</b>（对外名称、上架）、<b>价格</b>、<b>渠道</b>（真正提供它的上游）。渠道保存时，把「分组 × 模型」展开写入 ability 表；relay 把它常驻内存，控制面修改后通过 Redis 版本号在 1 秒内生效。</p>
+    <ol>
+      <li>按请求的模型和用户分组取出候选渠道，按优先级从高到低分档。</li>
+      <li>第 N 次尝试用第 N 档，档内按「权重 + 10」加权随机（避免权重为 0 的渠道永远选不到）。</li>
+      <li>渠道内多 Key 随机或轮询（轮询用 Redis INCR），跳过冷却中的 Key。</li>
+      <li>渠道的模型映射把对外名称改写成上游真实模型名，响应里再改回对外名称。</li>
+    </ol>
+    <p>健康管理：401 / 403 或错误信息命中「欠费、Key 无效」等关键词时禁用该 Key，渠道所有 Key 都不可用就禁用渠道并通知；429 / 5xx 冷却该 Key 30 秒；单个、批量、定时测试成功后自动恢复「自动禁用」的渠道（手动禁用的不动）。</p>
+
+    <!-- ============================================================ -->
+    <h2 id="billing"><span class="no">14</span>计费、账单与对账</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>项目</th><th>设计</th></tr></thead>
+      <tbody>
+        <tr><td>售价公式</td><td><code>⌈(普通输入 × 输入价 + 缓存读 × 缓存读价 + 缓存写 × 缓存写价 + 输出 × 输出价) / 10⁶⌉ × 分组倍率</code>，向上取整到微元；按次计费模型取固定价</td></tr>
+        <tr><td>价格版本</td><td>改价是新增一个版本，可设未来生效时间；已生效版本不可删除，历史账单可追溯</td></tr>
+        <tr><td>分时计价</td><td>价格版本可配置时段规则（星期、起止时间、时区、倍率），按请求开始时刻命中第一条并写入价格快照，同一请求不跨时段变价。DeepSeek 默认按低谷价为基础价，工作日 09:00–12:00、14:00–18:00 ×2。渠道成本默认跟随售价时段，也可单独配置采购时段（对用户统一价、上游分时计费时使用）</td></tr>
+        <tr><td>按量</td><td>预充值钱包，充值金额 × 分组充值倍率 × 满额折扣</td></tr>
+        <tr><td>套餐包</td><td>售价、token 数、适用模型或供应商、有效期、每人限购、输入 / 输出计量权重；售出后快照规则，商品后续修改不影响已售</td></tr>
+        <tr><td>成本与毛利</td><td>渠道成本倍率 × 原价 = 每笔成本，看板显示营收、成本、毛利</td></tr>
+        <tr><td>订单</td><td>下单 → 收银台 → 网关 HMAC 签名回调 → 验签与金额比对 → 行锁幂等发货；已收款发货失败停在 paid，可补发货</td></tr>
+        <tr><td>账单</td><td>日账单次日生成、月账单次月生成，生成后不可变：期初、期末、充值、消费、退款、套餐抵扣、分模型明细</td></tr>
+        <tr><td>平台内对账</td><td>① 钱包余额 = 钱包流水之和，套餐剩余 = 套餐流水之和 ② 每笔调用的扣费 = 对应的消费流水 ③ Redis 热数据 = PG 余额。每小时自动执行，管理端可手动执行、查看差异、标记处理</td></tr>
+        <tr><td>与厂商对账（账单）</td><td>按渠道导入厂商用量账单 CSV（兼容常见中英文列名、美元按汇率折算，同一天同一模型重复导入会覆盖），与平台按「对账时区的日期 × 上游模型」聚合的请求数、输入 / 输出 token、渠道成本逐行比对，超过容差（默认 1%）标记差异，并识别「仅平台有 / 仅上游有」</td></tr>
+        <tr><td>与厂商对账（余额）</td><td>对有余额接口的厂商（DeepSeek），worker 每小时记录余额快照；任选两次快照，余额减少量 = 上游实际扣费，与平台在同一时间窗内对该渠道核算的成本比对；余额上升会提示期间可能有充值</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="risk"><span class="no">15</span>风险与兜底</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>风险</th><th>兜底</th></tr></thead>
+      <tbody>
+        <tr><td>并发超卖</td><td>Lua 原子预扣；非调用扣减先冻结</td></tr>
+        <tr><td>Redis 宕机</td><td>PG 条件扣减降级或拒绝服务；outbox 恢复同步；对账核验</td></tr>
+        <tr><td>Redis 数据丢失</td><td>AOF 每秒刷盘、禁止淘汰；丢失后从 PG 重建，最多损失 1 秒内未落库的计量，由对账发现</td></tr>
+        <tr><td>结算或落库失败</td><td>结算与事件原子写入；消费者组重领；死信告警；预扣超时回收</td></tr>
+        <tr><td>重复扣费、重复发货</td><td>request_id、订单号、业务 ID 唯一约束；订单行锁 + 状态判断；兑换码 CAS</td></tr>
+        <tr><td>支付回调伪造</td><td>HMAC 签名校验、金额比对，不一致拒绝发货</td></tr>
+        <tr><td>调用中途调价</td><td>预扣时价格快照，结算沿用</td></tr>
+        <tr><td>预估偏差</td><td>以上游 usage 为准；透支上限；estimated 标记供对账</td></tr>
+        <tr><td>客户端断流</td><td>屏蔽取消的 finally：关闭上游 + 按已生成结算</td></tr>
+        <tr><td>上游故障、限流、欠费</td><td>分档重试、Key 冷却、自动禁用 + 通知、巡检自动恢复；DeepSeek 余额查询</td></tr>
+        <tr><td>缓存击穿打满连接池</td><td>鉴权单飞；按进程分配连接池；PG 连接上限 300（压测中发现并修复）</td></tr>
+        <tr><td>Nginx 连接数耗尽</td><td>每个流式请求占 2 个连接，worker_connections 16384（压测中发现并修复）</td></tr>
+        <tr><td>Key 泄露</td><td>用户 Key 只存哈希、可设白名单与上限；渠道 Key AES-256-GCM 加密，接口只返回掩码</td></tr>
+        <tr><td>SSRF</td><td>生产环境渠道地址只允许 https，解析到内网地址拒绝</td></tr>
+        <tr><td>管理端暴露、越权</td><td>管理接口只在 81 端口；三级角色；改密 / 禁用即时作废登录态；管理操作写审计</td></tr>
+        <tr><td>依赖供应链</td><td>LiteLLM 锁定版本；pnpm 拒绝 24 小时内发布的包</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="verify"><span class="no">16</span>测试与验证</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>手段</th><th>覆盖</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td class="mono nw">make test</td><td>分时计价 7 项；上游账单比对 1 项；额度引擎 10 项（预扣退款、不足不改数据、套餐顺序与部分覆盖、透支、幂等、令牌上限、版本去重、并发不超卖、对照组超卖）；支付回调并发重复只发货一次、篡改拒绝、兑换码并发只成功一次</td><td>21 / 21 通过</td></tr>
+        <tr><td class="mono nw">make bench</td><td>先查后扣 vs Lua；端到端 500 并发 + 对账</td><td>Lua 超卖 0；对账一致</td></tr>
+        <tr><td class="mono nw">make fault-redis</td><td>断流、截断、无 usage、500、401、Redis 宕机</td><td>全部符合预期</td></tr>
+        <tr><td class="mono nw">make sweep</td><td>管理端、用户端、公开接口 127 个调用的读写巡检</td><td>无 5xx（发现并修复 1 个：带小数字段的审计日志序列化）</td></tr>
+        <tr><td>真实渠道</td><td>DeepSeek（deepseek-flash）OpenAI 格式流式 + Anthropic 格式</td><td>扣费与上游 usage 一致</td></tr>
+      </tbody>
+    </table></div>
+
+    <!-- ============================================================ -->
+    <h2 id="gap"><span class="no">17</span>现状与差距</h2>
+    <p>题目要求的功能和讲解点都已覆盖并能演示。按商用标准，还有这些差距：</p>
+    <div class="scroll"><table>
+      <thead><tr><th>差距</th><th>影响</th><th>建议</th></tr></thead>
+      <tbody>
+        <tr><td>OpenAI / Anthropic 真实渠道未测</td><td>直通与转换路径只用 Mock 和 DeepSeek 验证过</td><td>填入 Key 后跑同一套冒烟测试</td></tr>
+        <tr><td>性能未在合适环境测</td><td>开发机 Docker 只有 1 CPU / 2GB，吞吐数字无参考意义</td><td>4 核以上环境压测，确定单机容量</td></tr>
+        <tr><td>自动化测试偏少</td><td>接口层靠巡检脚本，前端没有自动化测试</td><td>把巡检脚本纳入 CI，补关键页面的 E2E</td></tr>
+        <tr><td>回收任务按预估全额扣费</td><td>relay 崩溃时用户可能被多扣</td><td>回收时标记待复核，结合上游账单自动退差</td></tr>
+        <tr><td>二期功能</td><td>周期订阅、邀请返利、OAuth / 2FA、绘图视频任务、真实支付接入</td><td>按运营优先级排期</td></tr>
+      </tbody>
+    </table></div>
+
+    <footer>Token Market · 详细设计见 docs/ARCHITECTURE.md · 演示命令见 README.md</footer>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral", fontFamily: "Inter, PingFang SC, sans-serif" });
+</script>
+</body>
+</html>

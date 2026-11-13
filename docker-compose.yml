@@ -1,0 +1,118 @@
+x-server: &server
+  image: token-market/server:latest
+  build:
+    context: ./server
+  env_file: .env
+  environment:
+    TM_DATABASE_URL: postgresql+asyncpg://tm:${POSTGRES_PASSWORD:-tm}@postgres:5432/token_market
+    TM_REDIS_URL: redis://redis:6379/0
+    TM_RELAY_INTERNAL_URL: http://relay:8001
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB"]
+    environment:
+      POSTGRES_USER: tm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tm}
+      POSTGRES_DB: token_market
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tm -d token_market"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # 额度热数据不可被淘汰；AOF 每秒刷盘，宕机最多丢 1s，丢失部分由对账从 PG 重建
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    <<: *server
+    command: ["sh", "-c", "alembic upgrade head && python -m app.cli seed"]
+    restart: "no"
+
+  api:
+    <<: *server
+    environment:
+      TM_DATABASE_URL: postgresql+asyncpg://tm:${POSTGRES_PASSWORD:-tm}@postgres:5432/token_market
+      TM_REDIS_URL: redis://redis:6379/0
+      TM_RELAY_INTERNAL_URL: http://relay:8001
+      TM_DB_POOL_SIZE: 5
+      TM_DB_MAX_OVERFLOW: 5
+    command: ["uvicorn", "app.main_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${API_WORKERS:-2}", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/healthz',timeout=3)"]
+      interval: 10s
+      start_period: 60s
+      retries: 6
+
+  relay:
+    <<: *server
+    environment:
+      TM_DATABASE_URL: postgresql+asyncpg://tm:${POSTGRES_PASSWORD:-tm}@postgres:5432/token_market
+      TM_REDIS_URL: redis://redis:6379/0
+      TM_DB_POOL_SIZE: 5
+      TM_DB_MAX_OVERFLOW: 10
+    command: ["uvicorn", "app.main_relay:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "${RELAY_WORKERS:-2}", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-keep-alive", "75"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8001/healthz',timeout=3)"]
+      interval: 10s
+      start_period: 60s
+      retries: 6
+
+  worker:
+    <<: *server
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  mock-upstream:
+    build:
+      context: ./mock_upstream
+    ports:
+      - "18090:8090"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+    ports:
+      - "8080:80"   # 用户端 + 公开站
+      - "8081:81"   # 管理端
+    depends_on:
+      api:
+        condition: service_healthy
+      relay:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

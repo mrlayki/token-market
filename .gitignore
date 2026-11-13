@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+.turbo/
+.pytest_cache/
+.ruff_cache/
+*.log
+.DS_Store
